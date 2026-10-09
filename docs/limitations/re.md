@@ -44,8 +44,8 @@ match CPython's, with these divergences:
 ## Empty matches
 
 `finditer`, `findall`, `sub` and `split` follow the Rust `regex` crate's rule for empty matches, not CPython's.
-An empty match directly after the previous match is skipped, and after an empty match the search moves on one
-character rather than retrying at the same position for a non-empty match.
+An empty match at the position where the previous match ended is skipped, and after an empty match the search
+moves on one character rather than retrying at the same position for a non-empty match.
 So `re.finditer(r'x*', 'axb')` gives spans `(0, 0), (1, 2), (3, 3)`, where CPython also yields `(2, 2)`, and
 `re.findall(r'.*?', 'ab')` gives three empty strings where CPython gives `['', 'a', '', 'b', '']`.
 
@@ -69,8 +69,9 @@ Not implemented: `subn`, `groups` (count), `groupindex` (named-group
 mapping), `scanner`. The `pos` / `endpos` arguments accepted by
 `Pattern.search(string, pos, endpos)` etc. in CPython are **not** supported.
 
-A non-str subject passed to a Pattern *method* raises `expected string, not {type}` rather than CPython's
-`expected string or bytes-like object, got '{type}'`. The module-level functions match CPython's wording.
+A non-str subject passed to a Pattern *method* other than `finditer` raises `expected string, not {type}` rather
+than CPython's `expected string or bytes-like object, got '{type}'`. The module-level functions and `Pattern.finditer`
+match CPython's wording.
 
 ## `re.Match` objects
 

@@ -45,7 +45,7 @@ use crate::{
     modules::ModuleFunctions,
     types::{
         BoundedCompileError, Module, ReFinditer, RePattern, Type,
-        re_pattern::{extract_count, extract_maxsplit, translate_replacement},
+        re_pattern::{extract_count, extract_maxsplit, subject_str, translate_replacement},
         str::allocate_string,
     },
     value::Value,
@@ -200,7 +200,9 @@ pub(super) fn call(vm: &mut VM<'_>, function: ReFunctions, args: ArgValues) -> R
 /// matching CPython's `_compile`).
 fn call_compile(vm: &mut VM<'_>, args: ArgValues) -> RunResult<Value> {
     let ReCompileArgs { pattern, flags } = ReCompileArgs::from_args(args, vm)?;
-    Ok(resolve_pattern(pattern, flags, vm)?.into_value(vm.heap))
+    let resolved = resolve_pattern(pattern, flags, vm)?;
+    defer_drop!(resolved, vm);
+    Ok(resolved.to_value(vm.heap))
 }
 
 /// `re.search(pattern, string, flags=0)` — scan for a match anywhere in the string,
@@ -440,30 +442,6 @@ struct ReFinditerArgs {
     flags: Value,
 }
 
-/// Validates the `string` subject and borrows its text from the heap, zero-copy.
-///
-/// Runs *after* binding and pattern/flags resolution — CPython's `def` binds without
-/// type checks and only the C match machinery rejects a bad subject — so arity,
-/// pattern, and flags errors always win. Monty has no bytes matching: a bytes subject
-/// gets CPython's mixed-types message, anything else the `sre` wording.
-fn subject_str<'a>(value: &'a Value, vm: &'a VM<'_>) -> RunResult<&'a str> {
-    if value.is_str(vm.heap) {
-        value.to_str(vm)
-    } else if value.py_type_heap(vm.heap) == Type::Bytes {
-        // Monty patterns are always str, so a bytes subject is always
-        // CPython's string-pattern/bytes-subject mismatch.
-        Err(ExcType::type_error(
-            "cannot use a string pattern on a bytes-like object",
-        ))
-    } else {
-        // sre reports `type(x).__name__`, so `None` reads 'NoneType'.
-        Err(ExcType::type_error(format!(
-            "expected string or bytes-like object, got '{}'",
-            value.py_type_name(vm)
-        )))
-    }
-}
-
 /// The `pattern` argument for module-level `re` functions: an owned pattern string,
 /// or a live compiled `re.Pattern` that CPython's `_compile` passes through. Anything
 /// else — including `bytes`, as Monty has no bytes patterns — gets CPython's
@@ -554,13 +532,12 @@ enum ResolvedPattern {
 }
 
 impl ResolvedPattern {
-    /// Converts into an owned `re.Pattern` heap value, for callers that keep the pattern.
-    fn into_value(self, heap: &Heap) -> Value {
+    /// Returns a new reference to an `re.Pattern` heap value, for callers that keep the pattern.
+    fn to_value(&self, heap: &Heap) -> Value {
         match self {
             // Clone out of the shared cache entry: the `re.Pattern` is independent of the cache.
-            Self::Cached(compiled) => Value::Ref(heap.allocate(HeapData::RePattern(Box::new((*compiled).clone())))),
-            // The refcount taken at argument extraction transfers to the caller.
-            Self::Heap(value) => value,
+            Self::Cached(compiled) => Value::Ref(heap.allocate(HeapData::RePattern(Box::new((**compiled).clone())))),
+            Self::Heap(value) => value.clone_with_heap(heap),
         }
     }
 
@@ -730,11 +707,11 @@ fn resolve_pattern(pattern: Value, flags: Value, vm: &mut VM<'_>) -> RunResult<R
 fn call_finditer(vm: &mut VM<'_>, args: ArgValues) -> RunResult<Value> {
     let ReFinditerArgs { pattern, string, flags } = ReFinditerArgs::from_args(args, vm)?;
     defer_drop!(string, vm);
-    let pattern = resolve_pattern(pattern, flags, vm)?.into_value(vm.heap);
-    defer_drop!(pattern, vm);
+    let resolved = resolve_pattern(pattern, flags, vm)?;
+    defer_drop!(resolved, vm);
     let all_ascii = subject_str(string, vm)?.is_ascii();
     Ok(ReFinditer::allocate(
-        pattern.clone_with_heap(vm.heap),
+        resolved.to_value(vm.heap),
         string.clone_with_heap(vm.heap),
         all_ascii,
         vm.heap,

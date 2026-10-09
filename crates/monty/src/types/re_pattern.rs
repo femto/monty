@@ -469,7 +469,7 @@ impl<'h> PyTrait<'h> for HeapObjectRead<'h, RePattern> {
             Some(StaticStrings::Finditer) => {
                 let arg = args.get_one_arg("Pattern.finditer", vm.heap)?;
                 defer_drop!(arg, vm);
-                let all_ascii = arg.to_str(vm)?.is_ascii();
+                let all_ascii = subject_str(arg, vm)?.is_ascii();
                 Ok(ReFinditer::allocate(
                     self.clone_value(vm.heap),
                     arg.clone_with_heap(vm.heap),
@@ -715,6 +715,31 @@ impl<'h> PyTrait<'h> for HeapObjectRead<'h, ReFinditer> {
             subject.drop_with(vm);
             Ok(None)
         }
+    }
+}
+
+/// Validates the `string` subject and borrows its text from the heap, zero-copy.
+/// Shared by the module-level `re` functions and `Pattern.finditer`.
+///
+/// Runs *after* binding and pattern/flags resolution — CPython's `def` binds without
+/// type checks and only the C match machinery rejects a bad subject — so arity,
+/// pattern, and flags errors always win. Monty has no bytes matching: a bytes subject
+/// gets CPython's mixed-types message, anything else the `sre` wording.
+pub(crate) fn subject_str<'a>(value: &'a Value, vm: &'a VM<'_>) -> RunResult<&'a str> {
+    if value.is_str(vm.heap) {
+        value.to_str(vm)
+    } else if value.py_type_heap(vm.heap) == Type::Bytes {
+        // Monty patterns are always str, so a bytes subject is always
+        // CPython's string-pattern/bytes-subject mismatch.
+        Err(ExcType::type_error(
+            "cannot use a string pattern on a bytes-like object",
+        ))
+    } else {
+        // sre reports `type(x).__name__`, so `None` reads 'NoneType'.
+        Err(ExcType::type_error(format!(
+            "expected string or bytes-like object, got '{}'",
+            value.py_type_name(vm)
+        )))
     }
 }
 

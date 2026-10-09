@@ -1018,9 +1018,50 @@ assert [m.group() for m in re.finditer(r'^\w', 'ab\ncd', re.MULTILINE)] == ['a',
 # spans are in characters for a non-ASCII subject
 assert [m.span() for m in re.finditer(r'é', 'aébé')] == [(1, 2), (3, 4)]
 
-# the subject is type-checked when finditer is called, not on next()
+# a bad subject raises when finditer is called, the same through both entry points
+for subject, expected in [
+    (1, "expected string or bytes-like object, got 'int'"),
+    (None, "expected string or bytes-like object, got 'NoneType'"),
+    (b'a', 'cannot use a string pattern on a bytes-like object'),
+]:
+    for finditer in (lambda s: re.finditer(r'a', s), lambda s: re.compile(r'a').finditer(s)):
+        try:
+            finditer(subject)
+            assert False, 'expected TypeError'
+        except TypeError as exc:
+            assert str(exc) == expected
+
+# pattern and flags errors still win over a bad subject
 try:
-    re.finditer(r'a', 1)
+    re.finditer(1, 2)
     assert False, 'expected TypeError'
 except TypeError as exc:
-    assert str(exc) == "expected string or bytes-like object, got 'int'"
+    assert str(exc) == 'first argument must be string or compiled pattern'
+try:
+    re.finditer(re.compile(r'a'), 1, flags=re.IGNORECASE)
+    assert False, 'expected ValueError'
+except ValueError as exc:
+    assert str(exc) == 'cannot process flags argument with a compiled pattern'
+
+# the iterator has no len, compares by identity and unpacks like any iterator
+it = re.finditer(r'\d', 'a1b2c3')
+try:
+    len(it)
+    assert False, 'expected TypeError'
+except TypeError as exc:
+    assert str(exc) == "object of type 'callable_iterator' has no len()"
+assert it == it, 'an iterator equals itself'
+assert it != re.finditer(r'\d', 'a1b2c3'), 'distinct iterators are unequal'
+first, *rest = it
+assert first.group() == '1'
+assert [m.group() for m in rest] == ['2', '3']
+assert [m.group() for m in [*re.finditer(r'\d', 'x9y8')]] == ['9', '8']
+
+
+# an `__iter__` returning a finditer iterator drives a for loop
+class Numbers:
+    def __iter__(self):
+        return re.finditer(r'\d+', 'a1 b22')
+
+
+assert [m.group() for m in Numbers()] == ['1', '22']
