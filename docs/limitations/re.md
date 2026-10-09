@@ -41,6 +41,14 @@ match CPython's, with these divergences:
 - Positional `count` / `maxsplit` for `re.sub` / `re.split` do not emit
     CPython 3.13+'s `DeprecationWarning` (Monty has no warnings machinery).
 
+## Empty matches
+
+`finditer`, `findall`, `sub` and `split` follow the Rust `regex` crate's rule for empty matches, not CPython's.
+An empty match directly after the previous match is skipped, and after an empty match the search moves on one
+character rather than retrying at the same position for a non-empty match.
+So `re.finditer(r'x*', 'axb')` gives spans `(0, 0), (1, 2), (3, 3)`, where CPython also yields `(2, 2)`, and
+`re.findall(r'.*?', 'ab')` gives three empty strings where CPython gives `['', 'a', '', 'b', '']`.
+
 ## Flags
 
 Supported: `NOFLAG`, `IGNORECASE` / `I`, `MULTILINE` / `M`, `DOTALL` / `S`,

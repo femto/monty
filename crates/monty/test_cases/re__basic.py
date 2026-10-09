@@ -977,3 +977,50 @@ assert len(matches) == 2
 assert matches[0].group(1) == 'a'
 assert matches[0].group(2) == '1'
 assert matches[1].group(1) == 'b'
+
+# === re.finditer() is a lazy iterator ===
+it = re.finditer(r'\d+', 'a1 b22')
+assert iter(it) is it
+assert type(it).__name__ == 'callable_iterator'
+assert next(it).group() == '1'
+assert next(it).group() == '22'
+try:
+    next(it)
+    assert False, 'expected StopIteration'
+except StopIteration:
+    pass
+assert list(it) == []
+
+# Pattern.finditer, resuming after partial consumption
+it = re.compile(r'\w+').finditer('one two three')
+assert next(it).group() == 'one'
+assert [m.group() for m in it] == ['two', 'three']
+
+# no matches
+it = re.finditer(r'\d', 'abc')
+assert next(it, None) is None
+
+# capture groups, including an unmatched optional one
+it = re.finditer(r'(\w)=(\d)?', 'a=1 b= c=3')
+assert next(it).groups() == ('a', '1')
+assert next(it).groups() == ('b', None)
+assert next(it).span() == (7, 10)
+
+# zero-length matches advance instead of repeating
+assert [m.span() for m in re.finditer(r'', 'ab')] == [(0, 0), (1, 1), (2, 2)]
+assert [m.span() for m in re.finditer(r'\b', 'ab cd')] == [(0, 0), (2, 2), (3, 3), (5, 5)]
+assert [m.span() for m in re.finditer(r'(?=b)', 'abab')] == [(1, 1), (3, 3)]
+
+# searches resume in the full subject, so anchors and lookbehind still see it
+assert [m.span() for m in re.finditer(r'(?<=a)b', 'abab')] == [(1, 2), (3, 4)]
+assert [m.group() for m in re.finditer(r'^\w', 'ab\ncd', re.MULTILINE)] == ['a', 'c']
+
+# spans are in characters for a non-ASCII subject
+assert [m.span() for m in re.finditer(r'é', 'aébé')] == [(1, 2), (3, 4)]
+
+# the subject is type-checked when finditer is called, not on next()
+try:
+    re.finditer(r'a', 1)
+    assert False, 'expected TypeError'
+except TypeError as exc:
+    assert str(exc) == "expected string or bytes-like object, got 'int'"
