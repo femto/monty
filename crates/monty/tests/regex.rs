@@ -168,7 +168,7 @@ fn finditer_resumes_after_dump_and_load() {
         PrintWriter::Stdout,
     )
     .unwrap();
-    let bytes = dump("repl.py", None, SessionRef::Idle(&repl)).unwrap();
+    let bytes = dump("repl.py", None, &[], SessionRef::Idle(&repl)).unwrap();
     let Session::Idle(mut repl) = Dump::load(&bytes).unwrap().state else {
         panic!("dumped an idle session, loaded something else")
     };
