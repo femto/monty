@@ -993,10 +993,13 @@ fn snapshot_field_inits(vm: &VM<'_>, fields_id: HeapId, values: &[Option<Value>]
     values
         .iter()
         .map(|bound| {
-            let field = fields.as_mut().and_then(Iterator::next).and_then(|(_, field)| match field {
-                Value::Ref(id) => field_at_id(vm, *id),
-                _ => None,
-            });
+            let field = fields
+                .as_mut()
+                .and_then(Iterator::next)
+                .and_then(|(_, field)| match field {
+                    Value::Ref(id) => field_at_id(vm, *id),
+                    _ => None,
+                });
             match (bound, field) {
                 (Some(_), _) | (_, None) => FieldInit::Unsupplied,
                 (None, Some(field)) => match (field.default(), field.default_factory()) {
