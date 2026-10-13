@@ -247,17 +247,6 @@ pub(super) fn adoptable_field(bound: Option<&Value>, vm: &VM<'_>) -> Option<Heap
     }
 }
 
-/// The `Field` at `idx` in a `__dataclass_fields__` dict, in definition order.
-pub(super) fn field_at<'a>(vm: &'a VM<'_>, fields_id: HeapId, idx: usize) -> Option<&'a DataclassField> {
-    let HeapData::Dict(fields) = vm.heap.get(fields_id) else {
-        return None;
-    };
-    match fields.value_at(idx) {
-        Some(Value::Ref(id)) => field_at_id(vm, *id),
-        _ => None,
-    }
-}
-
 /// `Field` attributes CPython has but Monty has no object for, paired with what
 /// is missing. Refused rather than faked.
 const UNMODELLED_ATTRS: [(&str, &str); 2] = [

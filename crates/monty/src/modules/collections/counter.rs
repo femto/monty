@@ -397,20 +397,21 @@ pub(crate) fn counter_most_common<'h>(
         }
     };
 
-    let counts = counter
-        .get(vm.heap)
-        .iter()
-        .map(|(_, count)| count.clone_with_heap(vm.heap))
-        .collect();
+    // Snapshot the pairs BEFORE ordering: the sort runs user comparisons that
+    // can mutate the Counter, so the ordered indices refer to the snapshot.
+    let pairs = counter.clone_all_pairs(vm)?;
+    defer_drop!(pairs, vm);
+    let counts = pairs.iter().map(|(_, count)| count.clone_with_heap(vm.heap)).collect();
     let order = counter_order(counts, vm)?;
     let take = limit.unwrap_or(order.len()).min(order.len());
 
     let mut items: Vec<Value> = Vec::with_capacity(take);
     for &i in &order[..take] {
-        let dict = counter.get(vm.heap);
-        let key = dict.key_at(i).expect("index in range").clone_with_heap(vm.heap);
-        let count = dict.value_at(i).expect("index in range").clone_with_heap(vm.heap);
-        let pair = allocate_tuple(smallvec![key, count], vm.heap);
+        let (key, count) = &pairs[i];
+        let pair = allocate_tuple(
+            smallvec![key.clone_with_heap(vm.heap), count.clone_with_heap(vm.heap)],
+            vm.heap,
+        );
         items.push(pair);
     }
     Ok(vm.heap.allocate_as(List::new(items)).into_value())
@@ -430,16 +431,15 @@ pub(crate) fn counter_elements<'h>(
     // Resolve every repetition length up front: a count that `itertools.repeat`
     // rejects — non-integer (TypeError) or outside `ssize_t` (OverflowError) —
     // must raise before anything is built.
+    let counts: Vec<Value> = counter
+        .get(vm.heap)
+        .iter()
+        .map(|(_, count)| count.clone_with_heap(vm.heap))
+        .collect();
+    defer_drop!(counts, vm);
     let mut lengths = Vec::with_capacity(n);
-    for i in 0..n {
-        let count = counter
-            .get(vm.heap)
-            .value_at(i)
-            .expect("index in range")
-            .clone_with_heap(vm.heap);
-        let len = count_repeat_len(&count, vm);
-        count.drop_with(vm);
-        lengths.push(len?);
+    for count in counts {
+        lengths.push(count_repeat_len(count, vm)?);
     }
 
     // Pre-check the total element count against the resource tracker: a single
@@ -451,15 +451,11 @@ pub(crate) fn counter_elements<'h>(
     // `Vec::new()` (not `with_capacity(total)`): `total` is attacker-controlled,
     // and `check_repeat_size` above is the real guard (it fires before this loop
     // whenever a memory limit is set). Pre-reserving would itself panic.
+    // Nothing above runs user code, so the keys still line up with `lengths`.
     let mut items: Vec<Value> = Vec::new();
-    for (i, &count) in lengths.iter().enumerate() {
+    for ((key, _), &count) in counter.get(vm.heap).iter().zip(&lengths) {
         for _ in 0..count {
-            let key = counter
-                .get(vm.heap)
-                .key_at(i)
-                .expect("index in range")
-                .clone_with_heap(vm.heap);
-            items.push(key);
+            items.push(key.clone_with_heap(vm.heap));
         }
     }
     Ok(vm.heap.allocate_as(List::new(items)).into_value())

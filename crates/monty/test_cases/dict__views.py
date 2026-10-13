@@ -118,6 +118,32 @@ assert list(exhausted_iter) == ['a']
 exhausted_dict['b'] = 2
 assert next(exhausted_iter, None) is None
 
+# Swapping a key at the same size: the deleted entry's slot stays empty, so the
+# iterator reaches the new key only after yielding as many entries as it began
+# with, and reports the swap instead of yielding it.
+swapped = {'a': 1, 'b': 2, 'c': 3}
+swapped_iter = iter(swapped.items())
+assert next(swapped_iter) == ('a', 1)
+swapped.pop('a')
+swapped['d'] = 4
+assert next(swapped_iter) == ('b', 2)
+assert next(swapped_iter) == ('c', 3)
+try:
+    next(swapped_iter)
+    assert False, 'finding an extra key should raise'
+except RuntimeError as e:
+    assert str(e) == 'dictionary keys changed during iteration'
+assert next(swapped_iter, None) is None
+
+# Re-inserting a not-yet-reached key moves it to the end, where the iterator
+# still finds it within the count it started with.
+swapped = {'a': 1, 'b': 2, 'c': 3}
+swapped_iter = iter(swapped)
+assert next(swapped_iter) == 'a'
+swapped.pop('b')
+swapped['b'] = 5
+assert list(swapped_iter) == ['c', 'b']
+
 # === Unsupported operators do not materialize views ===
 # `dict_items` materialization hashes its pairs, so unsupported operators must
 # reject the operand types before encountering an unhashable value.

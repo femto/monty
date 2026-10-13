@@ -374,6 +374,7 @@ pub(crate) fn deep_copy_attrs(
     vm.heap
         .tracker
         .check_allocation(expected_len.saturating_mul(2 * VALUE_SIZE))?;
+    let mut slot = 0;
     for index in 0.. {
         let (_, vm) = guard.as_parts_mut();
         vm.heap.tracker.check_time_every(index)?;
@@ -381,9 +382,10 @@ pub(crate) fn deep_copy_attrs(
         if attrs(source_id, vm).len() != expected_len {
             return Err(ExcType::runtime_error_dict_changed_size());
         }
-        let Some((key, value)) = clone_pair(attrs(source_id, vm), index, vm) else {
+        let Some((next_slot, key, value)) = clone_pair(attrs(source_id, vm), slot, vm) else {
             break;
         };
+        slot = next_slot;
         let (key_copy, value_copy) = deep_copy_pair(key, value, memo, vm)?;
         let HeapReadOutput::Instance(mut instance) = vm.heap.read(copy_id) else {
             unreachable!("caller allocated an instance")
@@ -419,10 +421,11 @@ pub(crate) fn deep_copy_slots<'h>(
     Ok(copied)
 }
 
-/// Clones the `index`th key/value pair out of a dict, or `None` past its end.
-pub(crate) fn clone_pair(dict: &Dict, index: usize, vm: &VM<'_>) -> Option<(Value, Value)> {
-    let (key, value) = dict.item_at(index)?;
-    Some((key.clone_with_heap(vm.heap), value.clone_with_heap(vm.heap)))
+/// Clones the first live key/value pair at storage slot `slot` or later, with the
+/// slot to resume after it (see `Dict::next_item`), or `None` past the end.
+pub(crate) fn clone_pair(dict: &Dict, slot: usize, vm: &VM<'_>) -> Option<(usize, Value, Value)> {
+    let (found, key, value) = dict.next_item(slot)?;
+    Some((found + 1, key.clone_with_heap(vm.heap), value.clone_with_heap(vm.heap)))
 }
 
 /// Deep-copies an owned key and value, releasing both either way.
@@ -580,11 +583,13 @@ fn clone_attrs(id: HeapId, vm: &mut VM<'_>) -> RunResult<Vec<(Value, Value)>> {
         .tracker
         .check_allocation(len.saturating_mul(2).saturating_mul(VALUE_SIZE))?;
     let mut guard = DropGuard::new(Vec::with_capacity(len), vm);
+    // No user code runs during the snapshot, so the slot cursor stays valid.
+    let mut slot = 0;
     for index in 0..len {
         let (pairs, vm) = guard.as_parts_mut();
         vm.heap.tracker.check_time_every(index)?;
-        let attrs = attrs(id, vm);
-        let (key, value) = attrs.item_at(index).expect("index is in bounds");
+        let (found, key, value) = attrs(id, vm).next_item(slot).expect("len live entries remain");
+        slot = found + 1;
         pairs.push((key.clone_with_heap(vm.heap), value.clone_with_heap(vm.heap)));
     }
     Ok(guard.into_inner())

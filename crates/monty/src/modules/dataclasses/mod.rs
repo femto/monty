@@ -18,7 +18,7 @@ use std::{
     mem,
 };
 
-use self::field::{adoptable_field, field_at, field_at_id};
+use self::field::{adoptable_field, field_at_id};
 pub(crate) use self::{
     field::DataclassField,
     options::{DataclassOptions, DataclassParams},
@@ -985,16 +985,26 @@ impl<C: ContainsHeap> DropWithContext<C> for FieldInit {
 /// already bound is skipped, so a construction that supplies every argument
 /// clones nothing.
 fn snapshot_field_inits(vm: &VM<'_>, fields_id: HeapId, values: &[Option<Value>]) -> Vec<FieldInit> {
+    // The `Field`s in definition order, advanced in step with `values`.
+    let mut fields = match vm.heap.get(fields_id) {
+        HeapData::Dict(fields) => Some(fields.iter()),
+        _ => None,
+    };
     values
         .iter()
-        .enumerate()
-        .map(|(idx, bound)| match (bound, field_at(vm, fields_id, idx)) {
-            (Some(_), _) | (_, None) => FieldInit::Unsupplied,
-            (None, Some(field)) => match (field.default(), field.default_factory()) {
-                (Some(default), _) => FieldInit::Default(default.clone_with_heap(vm.heap)),
-                (None, Some(factory)) => FieldInit::Factory(factory.clone_with_heap(vm.heap)),
-                (None, None) => FieldInit::Unsupplied,
-            },
+        .map(|bound| {
+            let field = fields.as_mut().and_then(Iterator::next).and_then(|(_, field)| match field {
+                Value::Ref(id) => field_at_id(vm, *id),
+                _ => None,
+            });
+            match (bound, field) {
+                (Some(_), _) | (_, None) => FieldInit::Unsupplied,
+                (None, Some(field)) => match (field.default(), field.default_factory()) {
+                    (Some(default), _) => FieldInit::Default(default.clone_with_heap(vm.heap)),
+                    (None, Some(factory)) => FieldInit::Factory(factory.clone_with_heap(vm.heap)),
+                    (None, None) => FieldInit::Unsupplied,
+                },
+            }
         })
         .collect()
 }

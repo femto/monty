@@ -63,6 +63,67 @@ item = d.popitem()
 assert item == ('x', 10)
 assert d == {}
 
+# === deletion keeps insertion order and lookups ===
+# Deletions leave tombstones that are trimmed from the end or compacted once
+# they outnumber live entries; order and every remaining key survive both.
+d = {i: i * 10 for i in range(10)}
+assert d.pop(0) == 0
+assert d.pop(5) == 50
+assert d.pop(9) == 90
+assert list(d) == [1, 2, 3, 4, 6, 7, 8]
+assert d[4] == 40
+assert 5 not in d
+d[5] = 55
+assert list(d) == [1, 2, 3, 4, 6, 7, 8, 5]
+assert d.popitem() == (5, 55)
+assert d.popitem() == (8, 80)
+assert len(d) == 6
+
+# draining from the front crosses several compactions
+d = {i: i for i in range(100)}
+for i in range(95):
+    assert d.pop(i) == i
+assert list(d.items()) == [(95, 95), (96, 96), (97, 97), (98, 98), (99, 99)]
+assert d == {95: 95, 96: 96, 97: 97, 98: 98, 99: 99}
+for i in range(95):
+    assert i not in d
+for i in range(95, 100):
+    assert d[i] == i
+
+# draining with popitem is LIFO, including after middle deletions
+d = dict.fromkeys('abcdefgh', 0)
+d.pop('c')
+d.pop('f')
+assert [d.popitem()[0] for _ in range(6)] == ['h', 'g', 'e', 'd', 'b', 'a']
+assert d == {}
+
+# a re-inserted key moves to the end; an emptied dict is reusable
+d = {'a': 1, 'b': 2, 'c': 3}
+d.pop('a')
+d['a'] = 4
+assert list(d) == ['b', 'c', 'a']
+d.pop('a')
+d.pop('b')
+d.pop('c')
+assert d == {}
+d['z'] = 1
+assert list(d.items()) == [('z', 1)]
+
+# copies, views, repr and unpacking skip the tombstones
+d = {i: str(i) for i in range(6)}
+d.pop(1)
+d.pop(3)
+assert repr(d) == "{0: '0', 2: '2', 4: '4', 5: '5'}"
+assert d.copy() == {0: '0', 2: '2', 4: '4', 5: '5'}
+assert list(d.copy()) == [0, 2, 4, 5]
+assert dict(d) == d
+assert {**d} == d
+assert list(d.keys()) == [0, 2, 4, 5]
+assert list(d.values()) == ['0', '2', '4', '5']
+assert list(d.items()) == [(0, '0'), (2, '2'), (4, '4'), (5, '5')]
+assert len(d.keys()) == 4
+assert sorted(d, reverse=True) == [5, 4, 2, 0]
+
 # === dict.fromkeys() ===
 d = dict.fromkeys(['a', 'b', 'c'])
 assert d == {'a': None, 'b': None, 'c': None}

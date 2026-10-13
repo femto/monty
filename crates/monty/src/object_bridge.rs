@@ -1122,13 +1122,8 @@ fn intern_host_class_type(
 /// Clones every `(key, value)` pair out of a dict (or dataclass attrs) so
 /// recursive conversion cannot be invalidated by user code mutating it.
 fn snapshot_dict_pairs(dict: &Dict, heap: &Heap) -> Vec<(Value, Value)> {
-    (0..dict.len())
-        .map(|i| {
-            (
-                dict.key_at(i).expect("index in range").clone_with_heap(heap),
-                dict.value_at(i).expect("index in range").clone_with_heap(heap),
-            )
-        })
+    dict.iter()
+        .map(|(key, value)| (key.clone_with_heap(heap), value.clone_with_heap(heap)))
         .collect()
 }
 

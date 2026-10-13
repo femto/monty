@@ -46,6 +46,13 @@ except TypeError as exc:
 assert sorted(Counter(a=2, b=1).elements()) == ['a', 'a', 'b'], 'elements repeats each key by its count'
 assert list(Counter(a=2, b=-1, c=0).elements()) == ['a', 'a'], 'non-positive counts produce no elements'
 
+# === most_common and elements after deletions ===
+popped = Counter(a=1, b=3, c=2, d=4)
+popped.pop('a')
+popped.pop('d')
+assert popped.most_common() == [('b', 3), ('c', 2)]
+assert list(popped.elements()) == ['b', 'b', 'b', 'c', 'c']
+
 # === total ===
 assert Counter(a=2, b=3).total() == 5, 'total sums the counts'
 assert Counter().total() == 0, 'total of an empty counter is zero'

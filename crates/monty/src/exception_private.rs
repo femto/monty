@@ -1377,6 +1377,15 @@ pub(crate) trait ExcTypeExt: Sized {
         SimpleException::new_msg(ExcType::RuntimeError, "dictionary changed size during iteration").into()
     }
 
+    /// Creates a RuntimeError for a dict whose keys were replaced during iteration
+    /// without changing its size (an iterator finding more entries than it started with).
+    ///
+    /// Matches CPython's format: `RuntimeError: dictionary keys changed during iteration`
+    #[must_use]
+    fn runtime_error_dict_keys_changed() -> RunError {
+        SimpleException::new_msg(ExcType::RuntimeError, "dictionary keys changed during iteration").into()
+    }
+
     /// Creates a TypeError for `reversed()` on a non-reversible object.
     ///
     /// Matches CPython's format: `TypeError: '{type}' object is not reversible`

@@ -52,12 +52,15 @@ These raise `NameError`:
     no hash randomisation), but never persist one or compare one against a
     CPython hash. `sys.hash_info` is not exposed, so the parameters CPython
     publishes are unavailable (see [sys.md](sys.md)).
-- **`repr` of a dict being mutated by its own elements** — Monty iterates the
-    live entries like CPython, but deletion compacts Monty's dense entry storage
-    where CPython leaves a tombstone in place: a key deleted from inside a user
-    `__repr__` running *during that dict's repr* shifts later entries down, so
-    the entry after the deleted one can be skipped from the output where CPython
-    would still print it. Insertions during repr match CPython (appended and
+- **dicts compact on deletion** — a deletion leaves a tombstone as in CPython,
+    but Monty compacts the storage once tombstones outnumber live entries, where
+    CPython only compacts when an insertion resizes the dict. A walk that runs
+    user code between entries sees the later entries move when that happens: a
+    user `__repr__` that deletes keys *during that dict's repr* can make later
+    entries be skipped from the output where CPython would still print them, and
+    an iterator whose dict had a key swapped at the same size can stop, or raise
+    `RuntimeError: dictionary keys changed during iteration`, at a different
+    point than CPython's. Insertions during repr match CPython (appended and
     printed), as do list (live length, mid-repr pops truncate / appends extend),
     `set`, `collections.deque` and `collections.Counter` (all snapshot, like
     CPython).

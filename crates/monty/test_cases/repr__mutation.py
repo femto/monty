@@ -118,11 +118,10 @@ d2 = {KeyPopper(1): 1, KeyPopper(2): 2, KeyPopper(3, mutate=True): 3}
 assert repr(d2) == '{K1: 1, K2: 2, K3: 3}'
 
 
-# === dict: deleting a NOT-yet-printed entry mid-repr diverges ===
-# Monty's dense storage shifts later entries down where CPython leaves a
-# tombstone, so the entry that moves into an already-printed slot is skipped
-# (see limitations/builtins.md). These also prove the live bounds re-check
-# cannot panic when the dict shrinks under the repr cursor.
+# === dict: deleting mid-repr leaves a tombstone, as in CPython ===
+# Later entries keep their slots, so the repr cursor still reaches them. These
+# also prove the live bounds re-check cannot panic when the dict shrinks under
+# the repr cursor.
 class ShiftPopper:
     def __init__(self, n, mutate=False):
         self.n = n
@@ -140,27 +139,52 @@ class ShiftPopper:
         return f'K{self.n}'
 
 
-# the FIRST key deletes itself while printing: K2 shifts into the printed slot
+# the FIRST key deletes itself while printing: K2 keeps its slot
 target = {ShiftPopper(1, mutate=True): 1, ShiftPopper(2): 2, ShiftPopper(3): 3}
-if sys.platform == 'monty':
-    assert repr(target) == '{K1: 1, K3: 3}'
-else:
-    assert repr(target) == '{K1: 1, K2: 2, K3: 3}'
+assert repr(target) == '{K1: 1, K2: 2, K3: 3}'
+assert len(target) == 2
 
-# a LATER key deletes the already-printed first entry: the tail shifts past
-# the repr cursor and is skipped
+# a LATER key deletes the already-printed first entry: the tail is still printed
 target = {ShiftPopper(1): 1, ShiftPopper(2, mutate=True): 2, ShiftPopper(3): 3}
+assert repr(target) == '{K1: 1, K2: 2, K3: 3}'
+assert len(target) == 2
+
+
+# === dict: a deletion that compacts storage mid-repr diverges ===
+# Monty compacts once tombstones outnumber live entries, which moves later
+# entries behind the repr cursor; CPython only compacts when an insertion
+# resizes (see limitations/builtins.md).
+class DoublePopper:
+    def __init__(self, n, mutate=False):
+        self.n = n
+        self.mutate = mutate
+
+    def __hash__(self):
+        return self.n
+
+    def __eq__(self, other):
+        return self is other
+
+    def __repr__(self):
+        if self.mutate:
+            target.pop(next(iter(target)), None)
+            target.pop(next(iter(target)), None)
+        return f'K{self.n}'
+
+
+# K1 deletes itself and K2: two tombstones, one live entry, so Monty compacts
+target = {DoublePopper(1, mutate=True): 1, DoublePopper(2): 2, DoublePopper(3): 3}
 if sys.platform == 'monty':
-    assert repr(target) == '{K1: 1, K2: 2}'
+    assert repr(target) == '{K1: 1}'
 else:
-    assert repr(target) == '{K1: 1, K2: 2, K3: 3}'
+    assert repr(target) == '{K1: 1, K3: 3}'
+assert len(target) == 1
 
 
 # === dict: a VALUE repr mutating the dict ===
 # The mutation runs between the key printing and the value printing: the
 # entry's pair was already copied, so the value still prints even though its
-# entry is gone; the shrink is only seen at the next entry (divergent, as
-# above — CPython's tombstone keeps the middle entry).
+# entry is gone, and the tombstone keeps the later entries in place.
 class ValuePopper:
     def __init__(self, n, mutate=False):
         self.n = n
@@ -173,10 +197,7 @@ class ValuePopper:
 
 
 target = {'a': ValuePopper(1, mutate=True), 'b': ValuePopper(2), 'c': ValuePopper(3)}
-if sys.platform == 'monty':
-    assert repr(target) == "{'a': V1, 'c': V3}"
-else:
-    assert repr(target) == "{'a': V1, 'b': V2, 'c': V3}"
+assert repr(target) == "{'a': V1, 'b': V2, 'c': V3}"
 
 # the LAST value deleting an already-printed entry changes nothing on either
 # engine — everything affected has already printed

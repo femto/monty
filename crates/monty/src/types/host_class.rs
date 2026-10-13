@@ -1,5 +1,6 @@
 use std::{
     borrow::Cow,
+    cell::Cell,
     fmt::Write,
     hash::{DefaultHasher, Hash, Hasher},
     mem,
@@ -180,10 +181,13 @@ impl<'h> PyTrait<'h> for HeapObjectRead<'h, HostClass> {
         // All eager attrs are shown, in order.
         let name = self.get(vm.heap).name(vm.heap, vm.interns).to_owned();
         let attr_count = self.get(vm.heap).attrs.len();
-        write_dataclass_repr(f, &name, attr_count, vm, heap_ids, |i, vm| {
-            let Some((key, _)) = self.get(vm.heap).attrs.item_at(i) else {
+        // Storage-slot cursor over the attrs (see `Dict::next_item`).
+        let next_slot = Cell::new(0);
+        write_dataclass_repr(f, &name, attr_count, vm, heap_ids, |_, vm| {
+            let Some((slot, key, _)) = self.get(vm.heap).attrs.next_item(next_slot.get()) else {
                 return Ok((String::new(), None));
             };
+            next_slot.set(slot + 1);
             let key = key.clone_with_heap(vm.heap);
             defer_drop!(key, vm);
             // Keys are strings in practice; render a non-string key (possible
@@ -196,13 +200,13 @@ impl<'h> PyTrait<'h> for HeapObjectRead<'h, HostClass> {
                 repr.to_str(vm)?.to_owned()
             };
             // The value is cloned only after the fallible key formatting, so a
-            // formatting error cannot strand an unguarded clone; re-reading at
-            // index `i` also observes any mutation a key `__repr__` performed,
+            // formatting error cannot strand an unguarded clone; re-reading the
+            // slot also observes any mutation a key `__repr__` performed,
             // matching `write_dataclass_repr`'s resolve-just-before-write rule.
             let value = self
                 .get(vm.heap)
                 .attrs
-                .item_at(i)
+                .item_at(slot)
                 .map(|(_, v)| v.clone_with_heap(vm.heap));
             Ok((key_str, value))
         })

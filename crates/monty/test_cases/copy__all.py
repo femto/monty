@@ -56,6 +56,14 @@ keyed_copy = copy.deepcopy(keyed)
 assert keyed_copy == keyed
 assert keyed_copy[(1, 2)] == 'v'
 
+# === copies of dicts and instances skip deleted entries ===
+sparse = {i: [i] for i in range(5)}
+sparse.pop(0)
+sparse.pop(2)
+assert copy.deepcopy(sparse) == {1: [1], 3: [3], 4: [4]}
+assert list(copy.deepcopy(sparse)) == [1, 3, 4]
+assert list(copy.copy(sparse)) == [1, 3, 4]
+
 # === cycles terminate ===
 cyclic = []
 cyclic.append(cyclic)

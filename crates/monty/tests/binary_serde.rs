@@ -9,7 +9,7 @@
 use std::fmt::Write;
 
 use insta::assert_snapshot;
-use monty::{Dump, MontyRun, RunProgress, Session, SessionRef, dump};
+use monty::{Dump, MontyRepl, MontyRun, RunProgress, Session, SessionRef, dump};
 use monty_types::{
     CompileOptions, MontyException, MontyObject, MontyType, NameLookupResult, PrintWriter, ResourceTracker,
 };
@@ -376,6 +376,24 @@ fn run_progress_round_trip_multiple_calls() {
     // Resume second call to completion
     let result = call.resume(MontyObject::int(20), PrintWriter::Stdout).unwrap();
     assert_eq!(result.into_complete().unwrap(), MontyObject::int(30)); // 10 + 20
+}
+
+/// A dict with deletion tombstones keeps its slot layout across a dump, so an
+/// iterator suspended mid-walk resumes at the right entry.
+#[test]
+fn idle_session_round_trip_dict_iterator_over_tombstones() {
+    let mut repl = MontyRepl::new("repl.py", ResourceTracker::default(), CompileOptions::default());
+    let setup = "d = {i: i for i in range(8)}\nd.pop(0)\nd.pop(2)\nd.pop(3)\nit = iter(d.items())\nnext(it)";
+    repl.feed_run(setup, vec![], PrintWriter::Stdout).unwrap();
+    let bytes = dump("repl.py", None, &[], SessionRef::Idle(&repl)).unwrap();
+    let Session::Idle(mut repl) = Dump::load(&bytes).unwrap().state else {
+        panic!("dumped an idle session, loaded something else")
+    };
+    let rest = repl
+        .feed_run("[k for k, v in it] + list(d)", vec![], PrintWriter::Stdout)
+        .unwrap();
+    let expected = [4, 5, 6, 7, 1, 4, 5, 6, 7].map(MontyObject::int).to_vec();
+    assert_eq!(rest, MontyObject::list(expected));
 }
 
 /// Live `itertools` iterators on the heap survive a round-trip with their state
