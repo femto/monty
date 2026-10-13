@@ -658,6 +658,14 @@ pub(crate) trait PyTrait<'h>: PyObjectIdentity {
         .into())
     }
 
+    fn py_delitem(&mut self, key: Value, vm: &mut VM<'h>) -> RunResult<()> {
+        key.drop_with(vm);
+        Err(ExcType::type_error(format!(
+            "'{}' object does not support item deletion",
+            self.py_type_name(vm)
+        )))
+    }
+
     /// Python attribute assignment, consuming `value` on both success and error.
     ///
     /// The default rejects assignment. Mutable attribute-bearing types override
@@ -666,6 +674,10 @@ pub(crate) trait PyTrait<'h>: PyObjectIdentity {
         value.drop_with(vm);
         let type_name = self.py_type_name(vm);
         Err(ExcType::attribute_error_no_setattr(&type_name, name.as_str(vm.interns)))
+    }
+
+    fn py_del_attr(&mut self, name: &EitherStr, vm: &mut VM<'h>) -> RunResult<()> {
+        Err(ExcType::attribute_error(self.py_type_name(vm), name.as_str(vm.interns)))
     }
 
     /// Python attribute get operation (`__getattr__`), e.g., `obj.attr`.

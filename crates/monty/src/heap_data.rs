@@ -921,6 +921,13 @@ impl<'h> PyTrait<'h> for HeapReadOutput<'h> {
         )
     }
 
+    fn py_delitem(&mut self, key: Value, vm: &mut VM<'h>) -> RunResult<()> {
+        heap_read_output_py_trait_forward!(self, |item| item.py_delitem(key, vm), else {
+            key.drop_with(vm);
+            Err(ExcType::type_error(format!("'{}' object does not support item deletion", self.py_type_name(vm))))
+        })
+    }
+
     fn py_set_attr(&mut self, name: &EitherStr, value: Value, vm: &mut VM<'h>) -> RunResult<()> {
         heap_read_output_py_trait_forward!(
             self,
@@ -934,6 +941,12 @@ impl<'h> PyTrait<'h> for HeapReadOutput<'h> {
                 ))
             }
         )
+    }
+
+    fn py_del_attr(&mut self, name: &EitherStr, vm: &mut VM<'h>) -> RunResult<()> {
+        heap_read_output_py_trait_forward!(self, |item| item.py_del_attr(name, vm), else {
+            Err(ExcType::attribute_error(self.py_type_name(vm), name.as_str(vm.interns)))
+        })
     }
 
     fn py_getattr(&self, attr: &EitherStr, vm: &mut VM<'h>) -> RunResult<Option<CallResult>> {
