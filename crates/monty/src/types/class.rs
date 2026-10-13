@@ -147,6 +147,21 @@ impl<'h> PyTrait<'h> for HeapObjectRead<'h, Class> {
         Ok(())
     }
 
+    fn py_del_attr(&mut self, name: &EitherStr, vm: &mut VM<'h>) -> RunResult<()> {
+        let name_value = attribute_name_value(name, vm);
+        defer_drop!(name_value, vm);
+        match self.pop_attr(name_value, vm)? {
+            Some(value) => {
+                value.drop_with(vm);
+                Ok(())
+            }
+            None => Err(ExcType::attribute_error_type(
+                self.get(vm.heap).name.as_str(vm.interns),
+                name.as_str(vm.interns),
+            )),
+        }
+    }
+
     fn py_eq_impl(&self, _other: &Value, _vm: &mut VM<'h>) -> RunResult<Option<bool>> {
         // Classes return `NotImplemented`; rich equality's final identity
         // fallback makes a class equal only to itself.

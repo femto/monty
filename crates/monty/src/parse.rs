@@ -1,6 +1,6 @@
 use std::{borrow::Cow, fmt};
 
-use ahash::AHashSet;
+use ahash::{AHashMap, AHashSet};
 use monty_types::{MontyException, StackFrame};
 use num_bigint::BigInt;
 use num_traits::Num;
@@ -419,10 +419,13 @@ impl<'a, 'i> Parser<'a, 'i> {
                 Some(value) => Some(self.parse_expression(*value)?),
                 None => None,
             })),
-            Stmt::Delete(d) => Err(ParseError::not_implemented(
-                "the 'del' statement",
-                self.convert_range(d.range),
-            )),
+            Stmt::Delete(d) => {
+                let mut targets = Vec::new();
+                for target in d.targets {
+                    self.parse_delete_target(target, &mut targets)?;
+                }
+                Ok(Node::Delete(targets))
+            }
             Stmt::TypeAlias(t) => Err(ParseError::not_implemented("type aliases", self.convert_range(t.range))),
             Stmt::Assign(ast::StmtAssign {
                 mut targets,
@@ -894,6 +897,9 @@ impl<'a, 'i> Parser<'a, 'i> {
         // namespace dict from the body's locals.
         let mut body = Vec::new();
         let mut members = Vec::new();
+        // Each `del`-ed name mapped to `members.len()` at its last deletion: an
+        // earlier binding of it is dropped from `members` after the loop.
+        let mut deleted: AHashMap<StringId, usize> = AHashMap::new();
         // `(name, "source text")` pairs assembled into `__annotations__` below;
         // always stringized (PEP 563). See `limitations/typing.md`.
         let mut annotations: Vec<DictItem> = Vec::new();
@@ -905,6 +911,7 @@ impl<'a, 'i> Parser<'a, 'i> {
         // `__doc__ = ...` later in the body overwrites it, as in CPython.
         let doc_target = Identifier::new(self.interner.intern("__doc__"), self.convert_range(class.name.range));
         let mut doc_value = ExprLoc::new(self.convert_range(class.name.range), Expr::Literal(Literal::None));
+        members.push(doc_target);
 
         for (i, stmt) in class.body.into_iter().enumerate() {
             match stmt {
@@ -986,6 +993,16 @@ impl<'a, 'i> Parser<'a, 'i> {
                         ));
                     }
                 }
+                Stmt::Delete(delete) => {
+                    let parsed = self.parse_statement_impl(Stmt::Delete(delete))?;
+                    let Node::Delete(targets) = &parsed else { unreachable!() };
+                    for target in targets {
+                        if let AssignTarget::Name(name) = target {
+                            deleted.insert(name.name_id, members.len());
+                        }
+                    }
+                    body.push(parsed);
+                }
                 // `pass` and `...` (the common `class C: ...` stub idiom) are
                 // no-ops. A leading string literal is the class docstring and
                 // becomes the synthesized `__doc__` value; later bare string
@@ -1007,10 +1024,22 @@ impl<'a, 'i> Parser<'a, 'i> {
             }
         }
 
+        // Class bodies have no control flow, so a binding followed by a `del` of
+        // the same name is statically unbound when the namespace is assembled.
+        if !deleted.is_empty() {
+            let mut index = 0;
+            members.retain(|member| {
+                let keep = deleted
+                    .get(&member.name_id)
+                    .is_none_or(|&deleted_at| index >= deleted_at);
+                index += 1;
+                keep
+            });
+        }
+
         // The synthesized `__doc__` binding runs first (like CPython's docstring
         // store); the namespace assembly loads final local values, so an explicit
         // `__doc__` member still wins.
-        members.insert(0, doc_target);
         body.insert(
             0,
             Node::Assign {
@@ -1252,6 +1281,24 @@ impl<'a, 'i> Parser<'a, 'i> {
             AstExpr::Starred(ast::ExprStarred { range, .. }) => Err(starred_root_target(self.convert_range(range))),
             other => Ok(AssignTarget::Name(self.parse_identifier(other)?)),
         }
+    }
+
+    fn parse_delete_target(&mut self, target: AstExpr, output: &mut Vec<AssignTarget>) -> Result<(), ParseError> {
+        self.decr_depth_remaining(|| target.range())?;
+        let result = match target {
+            AstExpr::Tuple(ast::ExprTuple { elts, .. }) | AstExpr::List(ast::ExprList { elts, .. }) => {
+                for target in elts {
+                    self.parse_delete_target(target, output)?;
+                }
+                Ok(())
+            }
+            other => {
+                output.push(self.parse_assign_target(other)?);
+                Ok(())
+            }
+        };
+        self.depth_remaining += 1;
+        result
     }
 
     /// Parses an expression from the ruff AST into Monty's ExprLoc representation.
