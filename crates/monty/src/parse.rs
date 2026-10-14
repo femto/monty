@@ -904,14 +904,20 @@ impl<'a, 'i> Parser<'a, 'i> {
         // always stringized (PEP 563). See `limitations/typing.md`.
         let mut annotations: Vec<DictItem> = Vec::new();
 
-        // CPython stores the class docstring as a real `__doc__` entry in the
-        // class dict (`None` when absent), so synthesize a `__doc__ = <docstring
-        // or None>` binding as the first class-body statement — `Foo.__doc__` and
-        // `obj.__doc__` then work through ordinary namespace lookup. An explicit
-        // `__doc__ = ...` later in the body overwrites it, as in CPython.
+        // CPython binds a docstring as `__doc__` before the rest of the body runs,
+        // and `type()` fills in `__doc__ = None` if the body leaves it unbound.
+        // Both become synthesized assignments, so `Foo.__doc__` and `obj.__doc__`
+        // work through ordinary namespace lookup and `del __doc__` without a
+        // docstring raises `NameError`.
         let doc_target = Identifier::new(self.interner.intern("__doc__"), self.convert_range(class.name.range));
-        let mut doc_value = ExprLoc::new(self.convert_range(class.name.range), Expr::Literal(Literal::None));
-        members.push(doc_target);
+        let has_docstring = matches!(
+            class.body.first(),
+            Some(Stmt::Expr(ast::StmtExpr { value, .. })) if matches!(**value, AstExpr::StringLiteral(_))
+        );
+        let mut doc_value = None;
+        if has_docstring {
+            members.push(doc_target);
+        }
 
         for (i, stmt) in class.body.into_iter().enumerate() {
             match stmt {
@@ -1011,8 +1017,8 @@ impl<'a, 'i> Parser<'a, 'i> {
                 Stmt::Expr(ast::StmtExpr { value, .. })
                     if matches!(*value, AstExpr::StringLiteral(_) | AstExpr::EllipsisLiteral(_)) =>
                 {
-                    if i == 0 && matches!(*value, AstExpr::StringLiteral(_)) {
-                        doc_value = self.parse_expression(*value)?;
+                    if i == 0 && has_docstring {
+                        doc_value = Some(self.parse_expression(*value)?);
                     }
                 }
                 other => {
@@ -1037,16 +1043,24 @@ impl<'a, 'i> Parser<'a, 'i> {
             });
         }
 
-        // The synthesized `__doc__` binding runs first (like CPython's docstring
-        // store); the namespace assembly loads final local values, so an explicit
-        // `__doc__` member still wins.
-        body.insert(
-            0,
-            Node::Assign {
+        // The docstring binding runs first; the namespace assembly loads final
+        // local values, so an explicit `__doc__` member still wins.
+        if let Some(object) = doc_value {
+            body.insert(
+                0,
+                Node::Assign {
+                    target: doc_target,
+                    object,
+                },
+            );
+        }
+        if !members.iter().any(|m| m.name_id == doc_target.name_id) {
+            members.push(doc_target);
+            body.push(Node::Assign {
                 target: doc_target,
-                object: doc_value,
-            },
-        );
+                object: ExprLoc::new(doc_target.position, Expr::Literal(Literal::None)),
+            });
+        }
 
         // Last statement so the values are assembled after all members exist.
         // Always present (empty dict) to match `Cls.__annotations__ == {}`.

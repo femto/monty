@@ -148,6 +148,15 @@ impl<'h> PyTrait<'h> for HeapObjectRead<'h, Class> {
     }
 
     fn py_del_attr(&mut self, name: &EitherStr, vm: &mut VM<'h>) -> RunResult<()> {
+        let attr = name.as_str(vm.interns);
+        // `type`'s data descriptors for these shadow the namespace and refuse deletion.
+        if matches!(attr, "__name__" | "__doc__") {
+            return Err(ExcType::type_error_immutable_type_attr(
+                "delete",
+                attr,
+                self.get(vm.heap).name.as_str(vm.interns),
+            ));
+        }
         let name_value = attribute_name_value(name, vm);
         defer_drop!(name_value, vm);
         match self.pop_attr(name_value, vm)? {

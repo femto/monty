@@ -17,10 +17,10 @@ use super::{Type, allocate_string};
 use crate::{
     args::ArgValues,
     bytecode::{CallResult, VM},
-    exception_private::{ExcType, ExcTypeExt, RunResult, SimpleException},
+    exception_private::{ExcType, ExcTypeExt, RunError, RunResult, SimpleException},
     expressions::CmpOperator,
     hash::HashValue,
-    heap::{DropWithContext, HeapId, HeapObjectRead, HeapReadOutput},
+    heap::{DropWithContext, Heap, HeapData, HeapId, HeapObjectRead, HeapReadOutput},
     identity::Identity,
     value::{EitherStr, Value},
 };
@@ -632,11 +632,9 @@ pub(crate) trait PyTrait<'h>: PyObjectIdentity {
     }
 
     fn py_delitem(&mut self, key: Value, vm: &mut VM<'h>) -> RunResult<()> {
+        let error = item_deletion_error(self.py_type(vm), &self.py_type_name(vm), &key, vm.heap);
         key.drop_with(vm);
-        Err(ExcType::type_error(format!(
-            "'{}' object does not support item deletion",
-            self.py_type_name(vm)
-        )))
+        Err(error)
     }
 
     /// Python attribute assignment, consuming `value` on both success and error.
@@ -650,7 +648,11 @@ pub(crate) trait PyTrait<'h>: PyObjectIdentity {
     }
 
     fn py_del_attr(&mut self, name: &EitherStr, vm: &mut VM<'h>) -> RunResult<()> {
-        Err(ExcType::attribute_error(self.py_type_name(vm), name.as_str(vm.interns)))
+        Err(attribute_deletion_error(
+            self.py_type(vm),
+            &self.py_type_name(vm),
+            name.as_str(vm.interns),
+        ))
     }
 
     /// Python attribute get operation (`__getattr__`), e.g., `obj.attr`.
@@ -718,6 +720,39 @@ pub(crate) fn attribute_name_value(name: &EitherStr, vm: &VM<'_>) -> Value {
     match name {
         EitherStr::Interned(string_id) => Value::InternString(*string_id),
         EitherStr::Heap(s) => allocate_string(s.as_str(), vm.heap),
+    }
+}
+
+/// The error for `del obj[key]` on a type without item deletion.
+///
+/// Built before `key` is dropped. An integer key on a type with sequence slots
+/// ([`Type::has_sequence_slots`]) takes CPython's sequence path: `doesn't support`,
+/// or `IndexError` when the key overflows an index. Anything else says `does not`.
+pub(crate) fn item_deletion_error(type_: Type, type_name: &str, key: &Value, heap: &Heap) -> RunError {
+    let fits_index = match key {
+        Value::Int(_) | Value::Bool(_) => Some(true),
+        Value::Ref(id) => match heap.get(*id) {
+            HeapData::LongInt(li) => Some(li.to_i64().is_some()),
+            _ => None,
+        },
+        _ => None,
+    };
+    match fits_index {
+        Some(false) if type_.has_sequence_slots() => ExcType::index_error_int_too_large(),
+        Some(true) if type_.has_sequence_slots() => ExcType::type_error_not_del_item(type_name, true),
+        _ => ExcType::type_error_not_del_item(type_name, false),
+    }
+}
+
+/// The `AttributeError` for `del obj.attr` when `attr` does not exist.
+///
+/// CPython adds `and no __dict__ for setting new attributes` for types whose
+/// instances have no `__dict__` ([`Type::has_instance_dict`]).
+pub(crate) fn attribute_deletion_error(type_: Type, type_name: &str, attr: &str) -> RunError {
+    if type_.has_instance_dict() {
+        ExcType::attribute_error(type_name, attr)
+    } else {
+        ExcType::attribute_error_no_setattr(type_name, attr)
     }
 }
 
