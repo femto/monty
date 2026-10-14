@@ -3977,6 +3977,7 @@ impl<'a, 'i> Compiler<'a, 'i> {
             NameScope::Cell => {
                 // unbind the cell (CPython's DELETE_DEREF) so a captured
                 // `except ... as` target reads as unbound after cleanup
+                self.code.register_local_name(slot, target.name_id);
                 self.code.emit_u16(Opcode::DeleteCell, slot)?;
             }
             NameScope::CompVar => unreachable!("no syntax exists to `del` a comprehension variable"),

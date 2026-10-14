@@ -454,7 +454,9 @@ impl<'h> PyTrait<'h> for HeapObjectRead<'h, Deque> {
     fn py_delitem(&mut self, key: Value, vm: &mut VM<'h>) -> RunResult<()> {
         defer_drop!(key, vm);
         let idx = self.resolve_index(key, vm)?;
-        let removed = self.get_mut(vm.heap).items.remove(idx).expect("validated deque index");
+        let deque = self.get_mut(vm.heap);
+        let removed = deque.items.remove(idx).expect("validated deque index");
+        deque.bump_state();
         removed.drop_with(vm);
         Ok(())
     }

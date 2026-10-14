@@ -19,7 +19,7 @@ use crate::{
     hash::{HashValue, identity_hash},
     heap::{DropWithContext, HeapId, HeapItem, HeapObjectRead, HeapReadOutput},
     intern::FunctionId,
-    types::{LazyHeapSet, LongInt, PyTrait, Type},
+    types::{LazyHeapSet, LongInt, PyTrait, Type, attribute_deletion_error, item_deletion_error},
     value::{EitherStr, Value},
 };
 
@@ -923,8 +923,9 @@ impl<'h> PyTrait<'h> for HeapReadOutput<'h> {
 
     fn py_delitem(&mut self, key: Value, vm: &mut VM<'h>) -> RunResult<()> {
         heap_read_output_py_trait_forward!(self, |item| item.py_delitem(key, vm), else {
+            let error = item_deletion_error(self.py_type(vm), &self.py_type_name(vm), &key, vm.heap);
             key.drop_with(vm);
-            Err(ExcType::type_error(format!("'{}' object does not support item deletion", self.py_type_name(vm))))
+            Err(error)
         })
     }
 
@@ -945,7 +946,7 @@ impl<'h> PyTrait<'h> for HeapReadOutput<'h> {
 
     fn py_del_attr(&mut self, name: &EitherStr, vm: &mut VM<'h>) -> RunResult<()> {
         heap_read_output_py_trait_forward!(self, |item| item.py_del_attr(name, vm), else {
-            Err(ExcType::attribute_error(self.py_type_name(vm), name.as_str(vm.interns)))
+            Err(attribute_deletion_error(self.py_type(vm), &self.py_type_name(vm), name.as_str(vm.interns)))
         })
     }
 

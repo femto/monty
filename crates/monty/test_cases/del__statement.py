@@ -183,6 +183,41 @@ dq = deque([1, 2, 3])
 del dq[1]
 assert list(dq) == [1, 3]
 
+dq = deque([1, 2, 3, 4])
+try:
+    for item in dq:
+        if item == 1:
+            del dq[0]
+    assert False, 'expected RuntimeError'
+except RuntimeError as exc:
+    assert str(exc) == 'deque mutated during iteration'
+
+
+# === unsupported item deletion ===
+# CPython says `doesn't` for an integer key on a type with sequence slots, else `does not`
+def del_item_error(obj, key):
+    try:
+        del obj[key]
+    except TypeError as exc:
+        return str(exc)
+    return 'no error'
+
+
+assert del_item_error('abc', 0) == "'str' object doesn't support item deletion"
+assert del_item_error('abc', 'k') == "'str' object does not support item deletion"
+assert del_item_error((1, 2), True) == "'tuple' object doesn't support item deletion"
+assert del_item_error(range(3), 2) == "'range' object doesn't support item deletion"
+try:
+    del_item_error(range(3), 2**100)
+    assert False, 'expected IndexError'
+except IndexError as exc:
+    assert str(exc) == "cannot fit 'int' into an index-sized integer"
+assert del_item_error(5, 2**100) == "'int' object does not support item deletion"
+assert del_item_error(frozenset(), 0) == "'frozenset' object doesn't support item deletion"
+assert del_item_error(5, 0) == "'int' object does not support item deletion"
+assert del_item_error(None, 0) == "'NoneType' object does not support item deletion"
+assert del_item_error(len, 0) == "'builtin_function_or_method' object does not support item deletion"
+
 
 # === attributes ===
 class C:
@@ -205,6 +240,43 @@ try:
     assert False, 'expected AttributeError'
 except AttributeError as exc:
     assert str(exc) == "type object 'C' has no attribute 'missing'"
+
+
+try:
+    del C.__name__
+    assert False, 'expected TypeError'
+except TypeError as exc:
+    assert str(exc) == "cannot delete '__name__' attribute of immutable type 'C'"
+try:
+    del C.__doc__
+    assert False, 'expected TypeError'
+except TypeError as exc:
+    assert str(exc) == "cannot delete '__doc__' attribute of immutable type 'C'"
+assert del_item_error(c, 0) == "'C' object doesn't support item deletion"
+assert del_item_error(c, 'k') == "'C' object does not support item deletion"
+
+
+def del_attr_error(obj):
+    try:
+        del obj.missing
+    except (AttributeError, TypeError) as exc:
+        return f'{type(exc).__name__}: {exc}'
+    return 'no error'
+
+
+assert del_attr_error(1) == (
+    "AttributeError: 'int' object has no attribute 'missing' and no __dict__ for setting new attributes"
+)
+assert del_attr_error([]) == (
+    "AttributeError: 'list' object has no attribute 'missing' and no __dict__ for setting new attributes"
+)
+assert del_attr_error(len) == (
+    "AttributeError: 'builtin_function_or_method' object has no attribute 'missing'"
+    ' and no __dict__ for setting new attributes'
+)
+assert del_attr_error(del_item_error) == "AttributeError: 'function' object has no attribute 'missing'"
+assert del_attr_error(ValueError()) == "AttributeError: 'ValueError' object has no attribute 'missing'"
+assert del_attr_error(int) == "TypeError: cannot set 'missing' attribute of immutable type 'int'"
 
 
 @dataclass(frozen=True)
@@ -265,6 +337,34 @@ try:
     assert False, 'expected NameError'
 except NameError as exc:
     assert str(exc) == "name 'missing_name' is not defined"
+
+
+# === class-body __doc__ ===
+# a docstring binds `__doc__` before the body runs; otherwise it is only filled in afterwards
+class DocDeleted:
+    "doc"
+
+    del __doc__
+
+
+assert DocDeleted.__doc__ is None
+
+try:
+
+    class NoDocstring:
+        del __doc__
+
+    assert False, 'expected NameError'
+except NameError as exc:
+    assert str(exc) == "name '__doc__' is not defined"
+
+
+class DocAssignedThenDeleted:
+    __doc__ = 'x'
+    del __doc__
+
+
+assert DocAssignedThenDeleted.__doc__ is None
 
 # === target groups run left to right ===
 gd = {'x': 1}

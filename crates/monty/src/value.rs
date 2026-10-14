@@ -24,10 +24,11 @@ use crate::{
     modules::ModuleFunctions,
     py_value::PyValue,
     types::{
-        BytesIterator, CmpOrder, Complex, LazyHeapSet, Property, PyTrait, StringIterator, Type,
+        BytesIterator, CmpOrder, Complex, LazyHeapSet, Property, PyTrait, StringIterator, Type, attribute_deletion_error,
         bytes::PyBytes,
         decimal, host_class_type,
         instance::{class_defines, instance_getattr, instance_str, instance_user_eq},
+        item_deletion_error,
         long_int::{
             PyInt, bigint_cmp_f64, bigint_cmp_i64, bigint_divmod_tuple, bigint_eq_f64, bigint_eq_i64, i64_cmp_f64,
         },
@@ -719,11 +720,9 @@ impl<'h> PyTrait<'h> for Value {
         if let Self::Ref(id) = self {
             vm.heap.read(*id).py_delitem(key, vm)
         } else {
+            let error = item_deletion_error(self.py_type(vm), &self.py_type_name(vm), &key, vm.heap);
             key.drop_with(vm);
-            Err(ExcType::type_error(format!(
-                "'{}' object does not support item deletion",
-                self.py_type_name(vm)
-            )))
+            Err(error)
         }
     }
 
@@ -1227,10 +1226,19 @@ impl Value {
     }
 
     pub fn py_del_attr(&self, name: &EitherStr, vm: &mut VM<'_>) -> RunResult<()> {
-        if let Self::Ref(heap_id) = self {
-            vm.heap.read(*heap_id).py_del_attr(name, vm)
-        } else {
-            Err(ExcType::attribute_error(self.py_type_name(vm), name.as_str(vm.interns)))
+        match self {
+            Self::Ref(heap_id) => vm.heap.read(*heap_id).py_del_attr(name, vm),
+            // Built-in types are immutable; CPython words even deletion as `cannot set`.
+            Self::Builtin(Builtins::Type(t)) => Err(ExcType::type_error_immutable_type_attr(
+                "set",
+                name.as_str(vm.interns),
+                &t.name(vm.heap, vm.interns),
+            )),
+            _ => Err(attribute_deletion_error(
+                self.py_type(vm),
+                &self.py_type_name(vm),
+                name.as_str(vm.interns),
+            )),
         }
     }
 
