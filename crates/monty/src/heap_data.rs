@@ -1088,7 +1088,7 @@ impl<'h> PyTrait<'h> for HeapReadOutput<'h> {
 
     fn py_delitem(&mut self, key: Value, vm: &mut VM<'h>) -> RunResult<()> {
         heap_read_output_py_trait_forward!(self, |item| item.py_delitem(key, vm), else {
-            let error = item_deletion_error(self.py_type(vm), &self.py_type_name(vm), &key, vm.heap);
+            let error = item_deletion_error(self.py_type(vm), &self.py_type_name(vm), &key, vm);
             key.drop_with(vm);
             Err(error)
         })

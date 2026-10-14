@@ -20,7 +20,7 @@ use crate::{
     exception_private::{ExcType, ExcTypeExt, RunError, RunResult, SimpleException},
     expressions::CmpOperator,
     hash::HashValue,
-    heap::{DropWithContext, Heap, HeapData, HeapId, HeapObjectRead, HeapReadOutput},
+    heap::{DropWithContext, HeapId, HeapObjectRead, HeapReadOutput},
     identity::Identity,
     value::{EitherStr, Value},
 };
@@ -632,7 +632,7 @@ pub(crate) trait PyTrait<'h>: PyObjectIdentity {
     }
 
     fn py_delitem(&mut self, key: Value, vm: &mut VM<'h>) -> RunResult<()> {
-        let error = item_deletion_error(self.py_type(vm), &self.py_type_name(vm), &key, vm.heap);
+        let error = item_deletion_error(self.py_type(vm), &self.py_type_name(vm), &key, vm);
         key.drop_with(vm);
         Err(error)
     }
@@ -725,22 +725,25 @@ pub(crate) fn attribute_name_value(name: &EitherStr, vm: &VM<'_>) -> Value {
 
 /// The error for `del obj[key]` on a type without item deletion.
 ///
-/// Built before `key` is dropped. An integer key on a type with sequence slots
-/// ([`Type::has_sequence_slots`]) takes CPython's sequence path: `doesn't support`,
-/// or `IndexError` when the key overflows an index. Anything else says `does not`.
-pub(crate) fn item_deletion_error(type_: Type, type_name: &str, key: &Value, heap: &Heap) -> RunError {
-    let fits_index = match key {
-        Value::Int(_) | Value::Bool(_) => Some(true),
-        Value::Ref(id) => match heap.get(*id) {
-            HeapData::LongInt(li) => Some(li.to_i64().is_some()),
-            _ => None,
-        },
-        _ => None,
-    };
-    match fits_index {
-        Some(false) if type_.has_sequence_slots() => ExcType::index_error_int_too_large(),
-        Some(true) if type_.has_sequence_slots() => ExcType::type_error_not_del_item(type_name, true),
-        _ => ExcType::type_error_not_del_item(type_name, false),
+/// Built before `key` is dropped. On a type with sequence slots
+/// ([`Type::has_sequence_slots`]) CPython first converts an index-protocol key,
+/// running a user `__index__` and propagating its error or an `IndexError` on
+/// overflow, then says `doesn't support`. Anything else says `does not`.
+pub(crate) fn item_deletion_error(type_: Type, type_name: &str, key: &Value, vm: &mut VM<'_>) -> RunError {
+    if !type_.has_sequence_slots() {
+        return ExcType::type_error_not_del_item(type_name, false);
+    }
+    match key.py_index_impl(vm) {
+        Ok(Some(index)) => {
+            // CPython names the key's own type when its index overflows, as `as_index` does.
+            let key_type = key.py_type_name(vm).into_owned();
+            match Value::narrow_index_to_i64(index, vm, move || ExcType::index_error_cannot_fit(&key_type)) {
+                Ok(_) => ExcType::type_error_not_del_item(type_name, true),
+                Err(error) => error,
+            }
+        }
+        Ok(None) => ExcType::type_error_not_del_item(type_name, false),
+        Err(error) => error,
     }
 }
 

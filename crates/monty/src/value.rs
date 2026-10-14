@@ -1359,7 +1359,7 @@ impl<'h> PyTrait<'h> for Value {
         if let Self::Ref(id) = self {
             vm.heap.read(*id).py_delitem(key, vm)
         } else {
-            let error = item_deletion_error(self.py_type(vm), &self.py_type_name(vm), &key, vm.heap);
+            let error = item_deletion_error(self.py_type(vm), &self.py_type_name(vm), &key, vm);
             key.drop_with(vm);
             Err(error)
         }
@@ -1898,7 +1898,11 @@ impl Value {
     /// overflow message (`OverflowError` vs `IndexError`), hence `on_overflow`.
     /// The value is already validated as an int by [`PyTrait::py_index_impl`],
     /// so the non-int arms are unreachable.
-    fn narrow_index_to_i64(index: Self, vm: &mut VM<'_>, on_overflow: impl FnOnce() -> RunError) -> RunResult<i64> {
+    pub(crate) fn narrow_index_to_i64(
+        index: Self,
+        vm: &mut VM<'_>,
+        on_overflow: impl FnOnce() -> RunError,
+    ) -> RunResult<i64> {
         let converted = match &index {
             Self::Int(i) => Ok(*i),
             Self::Bool(b) => Ok(i64::from(*b)),

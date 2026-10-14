@@ -218,6 +218,41 @@ assert del_item_error(5, 0) == "'int' object does not support item deletion"
 assert del_item_error(None, 0) == "'NoneType' object does not support item deletion"
 assert del_item_error(len, 0) == "'builtin_function_or_method' object does not support item deletion"
 
+# on a sequence type, an `__index__` key is converted first, with its side effects and errors
+index_calls = []
+
+
+class Index:
+    def __index__(self):
+        index_calls.append('called')
+        return 0
+
+
+class BadIndex:
+    def __index__(self):
+        raise ValueError('bad index')
+
+
+class HugeIndex:
+    def __index__(self):
+        return 2**100
+
+
+assert del_item_error('abc', Index()) == "'str' object doesn't support item deletion"
+assert index_calls == ['called']
+assert del_item_error(5, Index()) == "'int' object does not support item deletion"
+assert index_calls == ['called']
+try:
+    del_item_error((1, 2), BadIndex())
+    assert False, 'expected ValueError'
+except ValueError as exc:
+    assert str(exc) == 'bad index'
+try:
+    del_item_error((1, 2), HugeIndex())
+    assert False, 'expected IndexError'
+except IndexError as exc:
+    assert str(exc) == "cannot fit 'HugeIndex' into an index-sized integer"
+
 
 # === attributes ===
 class C:
