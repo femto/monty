@@ -125,7 +125,13 @@ impl<'h> HeapRead<'h, Instance> {
     /// hook would be dispatched once one is. The write itself is
     /// [`set_attr_unchecked`](Self::set_attr_unchecked). `self_id` is this
     /// instance's id, which a property setter receives as `self`.
-    pub fn set_attr(&mut self, self_id: HeapId, name: Value, value: Value, vm: &mut VM<'h>) -> RunResult<Option<Value>> {
+    pub fn set_attr(
+        &mut self,
+        self_id: HeapId,
+        name: Value,
+        value: Value,
+        vm: &mut VM<'h>,
+    ) -> RunResult<Option<Value>> {
         let class_id = self.get(vm.heap).class();
         if let Some(exc) = dataclasses::frozen_assignment_error(class_id, &name, vm) {
             [name, value].drop_with(vm);
