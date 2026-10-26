@@ -24,7 +24,8 @@ use crate::{
     modules::ModuleFunctions,
     py_value::PyValue,
     types::{
-        BytesIterator, CmpOrder, Complex, LazyHeapSet, Property, PyTrait, StringIterator, Type, attribute_deletion_error,
+        BytesIterator, CmpOrder, Complex, LazyHeapSet, Property, PyTrait, StringIterator, Type,
+        attribute_deletion_error,
         bytes::PyBytes,
         decimal, host_class_type,
         instance::{class_defines, instance_getattr, instance_str, instance_user_eq},
