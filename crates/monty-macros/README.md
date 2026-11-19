@@ -75,8 +75,8 @@ Since CPython's `def` binding never type-checks, `style = def` structs
 should declare fields as raw `Value` (or `StrArg`-in-body) and coerce in the
 function body, so type errors carry the message the CPython function body
 would produce. `bad_arg` is rejected under `style = def` for the same
-reason, and so is `varargs` (a `*args` signature can never raise
-too-many-positional, so the style would have no effect).
+reason. `varargs` is allowed: a `*args` signature never overflows, but a
+missing required parameter still wants the `def` wording.
 
 `style = unpack` models `PyArg_UnpackTuple`'s fixed positional `min..max`
 range, so the derive rejects anything outside that shape: every positional
@@ -137,7 +137,7 @@ Cross-crate use would need `proc-macro-crate` and paths to the appropriate crate
 - [`monty-fs`](https://crates.io/crates/monty-fs) — host-side filesystem mounts: maps virtual sandbox paths to real host directories.
 - [`monty-runtime`](https://crates.io/crates/monty-runtime) — the `monty` binary: REPL, file runner, and subprocess worker mode.
 - [`monty-pool`](https://crates.io/crates/monty-pool) — an elastic pool of crash-isolated `monty` worker subprocesses.
-- [`monty-proto`](https://crates.io/crates/monty-proto) — the protobuf wire protocol spoken between pool parents and workers.
+- [`monty-proto`](https://crates.io/crates/monty-proto) — the protobuf wire protocol spoken between clients and workers.
 - [`monty-type-checking`](https://crates.io/crates/monty-type-checking) — type checking of sandboxed code, powered by [ty](https://docs.astral.sh/ty/).
 - [`monty-typeshed`](https://crates.io/crates/monty-typeshed) — the trimmed typeshed stubs describing the stdlib subset Monty implements.
 - [`monty-macros`](https://crates.io/crates/monty-macros) — the proc macros behind `monty`'s argument parsing. **this crate**
